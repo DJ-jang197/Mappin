@@ -94,8 +94,103 @@ type MessageResponse = {
   history?: AlarmHistoryEntry[];
 };
 
+type MessageType = ExtensionMessage["type"];
+
+const RATE_LIMIT_RULES: Partial<Record<MessageType, { windowMs: number; max: number }>> = {
+  SET_DESTINATION: { windowMs: 60_000, max: 30 },
+  SET_RADIUS: { windowMs: 60_000, max: 40 },
+  GET_STATE: { windowMs: 60_000, max: 120 },
+  ARRIVED: { windowMs: 60_000, max: 20 },
+  CLEAR_ALARM: { windowMs: 60_000, max: 20 },
+  ACK_ARRIVAL_COMPLETE: { windowMs: 60_000, max: 20 }
+};
+
+const rateLimitBuckets = new Map<string, number[]>();
+
+const MAX_LABEL_LENGTH = 200;
+
+function isExtensionUrl(url: string | undefined): boolean {
+  return Boolean(url && url.startsWith(`chrome-extension://${chrome.runtime.id}/`));
+}
+
+function isMapsUrl(url: string | undefined): boolean {
+  return Boolean(url && url.startsWith("https://www.google.com/maps/"));
+}
+
+function isValidCoords(lat: unknown, lng: unknown): boolean {
+  return (
+    typeof lat === "number" &&
+    Number.isFinite(lat) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    typeof lng === "number" &&
+    Number.isFinite(lng) &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+
+function isValidDestinationPayload(payload: unknown): payload is AlarmState["destination"] {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  const candidate = payload as {
+    coords?: { lat?: unknown; lng?: unknown };
+    label?: unknown;
+    setAt?: unknown;
+  };
+  if (!candidate.coords || !isValidCoords(candidate.coords.lat, candidate.coords.lng)) {
+    return false;
+  }
+  if (typeof candidate.label !== "string" || candidate.label.length > MAX_LABEL_LENGTH) {
+    return false;
+  }
+  if (typeof candidate.setAt !== "number" || !Number.isFinite(candidate.setAt)) {
+    return false;
+  }
+  return true;
+}
+
+function isTrustedSenderForMessage(
+  message: ExtensionMessage,
+  sender: chrome.runtime.MessageSender
+): boolean {
+  const senderUrl = sender.url ?? sender.tab?.url;
+  if (!senderUrl) {
+    return false;
+  }
+
+  if (message.type === "SET_DESTINATION") {
+    // Only Google Maps content script should set destination.
+    return isMapsUrl(senderUrl);
+  }
+
+  // Popup and extension pages own all state-mutating commands.
+  return isExtensionUrl(senderUrl);
+}
+
+function buildRateLimitKey(message: ExtensionMessage, sender: chrome.runtime.MessageSender): string {
+  const context = sender.tab?.id ?? sender.url ?? "unknown";
+  return `${message.type}:${context}`;
+}
+
+function isRateLimited(key: string, rule: { windowMs: number; max: number }, now = Date.now()): boolean {
+  const timestamps = rateLimitBuckets.get(key) ?? [];
+  const fresh = timestamps.filter((ts) => now - ts < rule.windowMs);
+  if (fresh.length >= rule.max) {
+    rateLimitBuckets.set(key, fresh);
+    return true;
+  }
+  fresh.push(now);
+  rateLimitBuckets.set(key, fresh);
+  return false;
+}
+
 async function handleExtensionMessage(message: ExtensionMessage): Promise<MessageResponse> {
   if (message.type === "SET_DESTINATION") {
+    if (!isValidDestinationPayload(message.payload)) {
+      return { ok: false, error: "Invalid destination payload" };
+    }
     const state = await getFullState();
     await setSessionState({
       ...state,
@@ -133,6 +228,10 @@ async function handleExtensionMessage(message: ExtensionMessage): Promise<Messag
   }
 
   if (message.type === "ARRIVED") {
+    const arrivedAt = message.payload.arrivedAt;
+    if (typeof arrivedAt !== "number" || !Number.isFinite(arrivedAt)) {
+      return { ok: false, error: "Invalid arrival timestamp" };
+    }
     const state = await getFullState();
     if (!state.destination || state.hasArrived) {
       return {
@@ -145,7 +244,7 @@ async function handleExtensionMessage(message: ExtensionMessage): Promise<Messag
 
     const historyEntry: AlarmHistoryEntry = {
       destination: state.destination,
-      arrivedAt: message.payload.arrivedAt
+      arrivedAt
     };
     await setSessionState({ ...state, hasArrived: true, isActive: false });
     await appendArrivalHistory(historyEntry);
@@ -186,7 +285,24 @@ async function handleExtensionMessage(message: ExtensionMessage): Promise<Messag
   return { ok: false, error: "Unknown message type" };
 }
 
-chrome.runtime.onMessage.addListener((message: ExtensionMessage, _, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
+  if (!isTrustedSenderForMessage(message, sender)) {
+    sendResponse({
+      ok: false,
+      error: "Untrusted sender for this request."
+    });
+    return false;
+  }
+
+  const rule = RATE_LIMIT_RULES[message.type];
+  if (rule && isRateLimited(buildRateLimitKey(message, sender), rule)) {
+    sendResponse({
+      ok: false,
+      error: "Too many requests. Please slow down and try again."
+    });
+    return false;
+  }
+
   handleExtensionMessage(message)
     .then((response) => {
       sendResponse(response);
