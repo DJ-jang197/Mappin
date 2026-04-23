@@ -1,6 +1,6 @@
 {
-  "name": "Location Alarm",
-  "short_name": "LocAlarm",
+  "name": "Mappin",
+  "short_name": "Mappin",
   "description": "Paste a Google Maps URL and get notified when you arrive within your chosen radius.",
   "start_url": "./",
   "display": "standalone",

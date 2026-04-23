@@ -42,6 +42,12 @@ async function appendArrivalHistory(entry: AlarmHistoryEntry): Promise<void> {
   await chrome.storage.local.set({ alarmHistory: next });
 }
 
+async function getAlarmHistory(): Promise<AlarmHistoryEntry[]> {
+  const result = await chrome.storage.local.get("alarmHistory");
+  const raw = result.alarmHistory as AlarmHistoryEntry[] | undefined;
+  return Array.isArray(raw) ? raw : [];
+}
+
 const NOTIFICATION_ICON_URL = chrome.runtime.getURL("icons/icon-128.png");
 
 function showArrivalNotification(label: string): void {
@@ -55,7 +61,7 @@ function showArrivalNotification(label: string): void {
       {
         type: "basic",
         iconUrl: NOTIFICATION_ICON_URL,
-        title: "Location reached",
+        title: "Mappin — you've arrived",
         message: `You arrived at ${label || "your destination"}.`
       },
       () => {
@@ -78,66 +84,99 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message: ExtensionMessage, _, sendResponse) => {
-  void (async () => {
-    if (message.type === "SET_DESTINATION") {
-      const state = await getFullState();
-      await setSessionState({
-        ...state,
-        destination: message.payload,
-        isActive: false,
-        hasArrived: false
-      });
-      sendResponse({ ok: true, state: await getFullState() });
-      return;
+type MessageResponse = {
+  ok: boolean;
+  error?: string;
+  skipped?: boolean;
+  state?: AlarmState;
+  history?: AlarmHistoryEntry[];
+};
+
+async function handleExtensionMessage(message: ExtensionMessage): Promise<MessageResponse> {
+  if (message.type === "SET_DESTINATION") {
+    const state = await getFullState();
+    await setSessionState({
+      ...state,
+      destination: message.payload,
+      isActive: false,
+      hasArrived: false
+    });
+    return { ok: true, state: await getFullState(), history: await getAlarmHistory() };
+  }
+
+  if (message.type === "CLEAR_ALARM") {
+    const state = await getFullState();
+    await setSessionState({ ...DEFAULT_STATE, radiusMetres: state.radiusMetres });
+    return {
+      ok: true,
+      state: await getFullState(),
+      history: await getAlarmHistory()
+    };
+  }
+
+  if (message.type === "SET_RADIUS") {
+    const raw = message.payload.radiusMetres;
+    const r = Math.round(raw);
+    if (!Number.isFinite(r) || r < RADIUS_MIN_M || r > RADIUS_MAX_M) {
+      return { ok: false, error: "Invalid radius" };
     }
+    await chrome.storage.sync.set({ radiusMetres: r });
+    const session = await getSessionState();
+    await setSessionState({ ...session, radiusMetres: r });
+    return {
+      ok: true,
+      state: await getFullState(),
+      history: await getAlarmHistory()
+    };
+  }
 
-    if (message.type === "CLEAR_ALARM") {
-      const state = await getFullState();
-      await setSessionState({ ...DEFAULT_STATE, radiusMetres: state.radiusMetres });
-      sendResponse({ ok: true, state: await getFullState() });
-      return;
-    }
-
-    if (message.type === "SET_RADIUS") {
-      const raw = message.payload.radiusMetres;
-      const r = Math.round(raw);
-      if (!Number.isFinite(r) || r < RADIUS_MIN_M || r > RADIUS_MAX_M) {
-        sendResponse({ ok: false, error: "Invalid radius" });
-        return;
-      }
-      await chrome.storage.sync.set({ radiusMetres: r });
-      const session = await getSessionState();
-      await setSessionState({ ...session, radiusMetres: r });
-      sendResponse({ ok: true, state: await getFullState() });
-      return;
-    }
-
-    if (message.type === "ARRIVED") {
-      const state = await getFullState();
-      if (!state.destination || state.hasArrived) {
-        sendResponse({ ok: true, skipped: true });
-        return;
-      }
-
-      const historyEntry: AlarmHistoryEntry = {
-        destination: state.destination,
-        arrivedAt: message.payload.arrivedAt
+  if (message.type === "ARRIVED") {
+    const state = await getFullState();
+    if (!state.destination || state.hasArrived) {
+      return {
+        ok: true,
+        skipped: true,
+        state: await getFullState(),
+        history: await getAlarmHistory()
       };
-      await setSessionState({ ...state, hasArrived: true, isActive: false });
-      await appendArrivalHistory(historyEntry);
-      showArrivalNotification(state.destination.label || "your destination");
-      sendResponse({ ok: true, state: await getFullState() });
-      return;
     }
 
-    if (message.type === "GET_STATE") {
-      sendResponse({ ok: true, state: await getFullState() });
-      return;
-    }
+    const historyEntry: AlarmHistoryEntry = {
+      destination: state.destination,
+      arrivedAt: message.payload.arrivedAt
+    };
+    await setSessionState({ ...state, hasArrived: true, isActive: false });
+    await appendArrivalHistory(historyEntry);
+    showArrivalNotification(state.destination.label || "your destination");
+    return {
+      ok: true,
+      state: await getFullState(),
+      history: await getAlarmHistory()
+    };
+  }
 
-    sendResponse({ ok: false, error: "Unknown message type" });
-  })();
+  if (message.type === "GET_STATE") {
+    return {
+      ok: true,
+      state: await getFullState(),
+      history: await getAlarmHistory()
+    };
+  }
 
+  return { ok: false, error: "Unknown message type" };
+}
+
+chrome.runtime.onMessage.addListener((message: ExtensionMessage, _, sendResponse) => {
+  handleExtensionMessage(message)
+    .then((response) => {
+      sendResponse(response);
+    })
+    .catch((err) => {
+      console.error("[location-alarm] onMessage:", err);
+      sendResponse({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    });
   return true;
 });

@@ -5,12 +5,38 @@ Location Alarm helps you set a destination from Google Maps and get notified whe
 - **Chrome extension (MV3):** runs on `https://www.google.com/maps/*`, reads URL/DOM in-page, uses the popup for geolocation (manifest includes the `geolocation` permission required by Chrome for popup `navigator.geolocation`).
 - **Web app:** works in any modern mobile or desktop browser. You **paste a Google Maps URL** (coordinates must appear in the link), then start monitoring. No Chrome APIs; state is stored in `localStorage` on that origin.
 
+## Mobile & the Google Maps app
+
+**Most people use the official Google Maps app on their phone.** That app is separate from the Chrome browser. This project respects that reality in two different ways:
+
+### What the Chrome extension can (and cannot) do on a phone
+
+- The **extension** is built for **desktop Chrome** (where you can install it from `chrome://extensions` and use it on `https://www.google.com/maps/` in a normal tab).
+- **Phone Chrome** and **Safari** do **not** offer the same “install this MV3 extension and run it everywhere” experience as desktop. In practice, **recruiters and friends testing on a phone will not use the extension inside the native Maps app**—that app never loads your extension code.
+- So for mobile, treat the **extension as the desktop story** (“I’m in Maps in Chrome on my laptop”).
+
+### How mobile users are supposed to use Location Alarm
+
+Use the **web app** (files under `dist/web/` after a build, or your hosted site):
+
+1. Pick a place in the **Google Maps app** (or any Maps client that lets you copy a link).
+2. **Share → Copy link** (wording may vary slightly by platform).
+3. Open the **Location Alarm web app** in **Safari, Chrome, or another mobile browser** (not inside the Maps app).
+4. **Paste** the link, load the destination, then **Start monitoring** and allow **location** (and notifications if you want) **for that website**.
+
+You are switching between two apps on purpose: **Maps** (pick place, copy link) → **browser** (alarm + GPS). That matches the rule of **no paid Maps APIs** and **no code running inside Google’s native app**.
+
+### Links from the Maps app
+
+- Many shared links include **`@latitude,longitude`** or **`?q=lat,lng`**—those work well with the web app’s parser.
+- If the pasted link is **only a place name** with no coordinates in the URL, the web app may not be able to resolve it (the extension on **desktop** can sometimes use a DOM fallback on the Maps **website**; the web app cannot read the Maps app’s screen).
+
 ## Milestone Status
 
 - M1: done (scaffold/build/load path working)
 - M2: done (parser + tests implemented)
 - M3: done (Haversine + popup `watchPosition`, arrival flow, notifications icon, GPS edge cases, already-at-destination)
-- M4: not started
+- M4: done (popup three-state panel, GPS accuracy badge, error banner, recent arrivals list, Clear alarm)
 
 ## Build and Load
 
@@ -143,6 +169,39 @@ Use this script during local QA and demo recording.
 - [ ] Trigger arrivals for more than 5 destinations
 - [ ] In service worker console, run `chrome.storage.local.get("alarmHistory")`
 - [ ] Confirm only latest 5 entries are retained
+- [ ] Confirm the popup **Recent arrivals** list matches (newest first)
+
+## Manual Test Checklist (M4 — popup polish)
+
+### 1) Three-state panel
+
+- [ ] No destination: panel shows **Idle** (neutral styling) and destination hint
+- [ ] Destination set, monitoring off: **Ready** (warm styling)
+- [ ] After **Start monitoring**: **Active** (blue styling) while the watch runs
+- [ ] After arrival: **Arrived** (green styling) and live metrics hide
+
+### 2) GPS accuracy badge
+
+- [ ] While **Active**, badge shows **±Xm**; at **>500 m** accuracy it uses the warning (red) style
+
+### 3) Error banner
+
+- [ ] Deny location (or break GPS): a visible red error banner appears with guidance text
+
+### 4) Clear alarm
+
+- [ ] Tap **Clear**: destination clears, state returns to **Idle**, monitoring stops
+- [ ] **Recent arrivals** list is unchanged (history is separate from current alarm)
+
+### 4b) Stop vs Refresh vs Clear
+
+- **Stop** — ends the live GPS watch and sets the trip to **Ready**; the destination from Maps is still stored.
+- **Refresh** — asks the background for the latest `chrome.storage.session` / sync state (e.g. after you changed place in another Maps tab).
+- **Clear** — clears the current alarm session (no destination, not arrived); radius and **Recent arrivals** stay.
+
+### 5) Demo video (portfolio)
+
+- [ ] Record a short walkthrough (install → Maps → popup → monitoring → arrival). Script talking points are in your original project brief.
 
 ## Troubleshooting
 

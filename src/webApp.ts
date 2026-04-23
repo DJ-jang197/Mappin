@@ -196,7 +196,7 @@ function showArrivalNotification(destination: Destination): void {
     return;
   }
   try {
-    new Notification("Location reached", {
+    new Notification("Mappin — you've arrived", {
       body: `You arrived at ${destination.label || "your destination"}.`
     });
   } catch {

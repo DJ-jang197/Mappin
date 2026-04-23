@@ -3,21 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Location Alarm</title>
+    <title>Mappin</title>
   </head>
   <body>
     <main class="popup-root">
-      <h1>Location Alarm</h1>
-      <p id="status">Loading...</p>
-      <p id="destination"></p>
+      <h1 class="app-title"><span class="app-title-brand">Mappin</span></h1>
+
+      <section class="state-panel" id="state-panel" data-state="idle" aria-live="polite">
+        <span class="state-pill" id="state-pill">Idle</span>
+        <p class="state-desc" id="state-desc">Open Google Maps and pick a destination.</p>
+      </section>
+
+      <section class="card">
+        <h2 class="section-title">Destination</h2>
+        <p id="destination" class="destination-text">Loading…</p>
+      </section>
+
+      <div id="metrics-block" class="metrics-block" hidden>
+        <p id="distance" class="distance-line"></p>
+        <div class="accuracy-row">
+          <span class="metric-label">GPS</span>
+          <span id="accuracy-badge" class="accuracy-badge accuracy-badge--hidden" role="status"></span>
+        </div>
+      </div>
+
+      <p id="error" class="error-banner" role="alert"></p>
+
       <p id="geo-hint" class="hint">
-        Location runs only while this popup is open. Click <strong>Start monitoring</strong> after
-        opening — Chrome needs a tap before it can request your position.
+        Location runs only while this popup is open. Tap <strong>Start monitoring</strong> when you travel —
+        Chrome needs a tap before it can request your position.
       </p>
-      <button id="start-monitoring" type="button">Start monitoring</button>
-      <p id="distance"></p>
-      <p id="accuracy"></p>
-      <p id="error" class="error"></p>
+      <button type="button" id="start-monitoring" class="btn btn-primary" title="Begin GPS updates for the current destination">
+        Start monitoring
+      </button>
+
       <div class="field" id="radius-field">
         <label for="radius-slider">Arrival radius</label>
         <div class="radius-row">
@@ -34,7 +53,44 @@
           <span class="unit">m</span>
         </div>
       </div>
-      <button id="refresh-state" type="button">Refresh</button>
+
+      <div class="button-row button-row--actions">
+        <button
+          type="button"
+          id="stop-monitoring"
+          class="btn btn-secondary"
+          title="Stop the GPS watch. Your Maps destination stays set so you can start again."
+        >
+          Stop
+        </button>
+        <button
+          type="button"
+          id="refresh-state"
+          class="btn btn-secondary"
+          title="Reload destination and settings from storage (e.g. after picking a new place in another Maps tab)."
+        >
+          Refresh
+        </button>
+        <button
+          type="button"
+          id="clear-alarm"
+          class="btn btn-secondary"
+          title="Remove the current destination and reset this trip. Recent arrivals list is not deleted."
+        >
+          Clear
+        </button>
+      </div>
+      <p class="button-help">
+        <strong>Stop</strong> — end live GPS; destination stays. <strong>Refresh</strong> — pull latest
+        destination/state from the extension. <strong>Clear</strong> — remove destination and reset the trip
+        (history below stays).
+      </p>
+
+      <section class="history-block">
+        <h2 class="section-title">Recent arrivals</h2>
+        <p id="history-empty" class="history-hint">No arrivals yet.</p>
+        <ul id="history-list" class="history-list" aria-label="Last five arrivals"></ul>
+      </section>
     </main>
     <script src="popup.js"></script>
   </body>
