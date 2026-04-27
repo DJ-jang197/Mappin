@@ -146,6 +146,3 @@ Ensure:
 - Hard refresh browser (`Ctrl+Shift+R`)
 - If serving static files, restart your local server
 
----
-
-If you plan to publish publicly, host `dist/web` over HTTPS for best location/notification compatibility on mobile.
